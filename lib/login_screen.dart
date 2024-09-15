@@ -16,10 +16,7 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _keyController = TextEditingController();
   bool _isLoading = false;
-  final storage = const FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
-    iOptions: IOSOptions(),
-  );
+  final storage = FlutterSecureStorage();
   String udid = "";
 
   @override
@@ -29,12 +26,9 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _getOrCreateUDID() async {
-    // Tenta ler o UUID do armazenamento seguro
     String? storedUdid = await storage.read(key: 'device_udid');
     if (storedUdid == null) {
-      // Gera um novo UUID se não houver um armazenado
-      storedUdid = const Uuid().v4();
-      // Armazena o UUID gerado
+      storedUdid = Uuid().v4();
       await storage.write(key: 'device_udid', value: storedUdid);
     }
     setState(() {
@@ -58,6 +52,9 @@ class _LoginScreenState extends State<LoginScreen> {
       });
 
       if (response['message'] == 'success') {
+        // Salva a chave após o login bem-sucedido
+        await storage.write(key: 'user_key', value: key);
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Column(
@@ -76,9 +73,14 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         );
 
+        // Navega para a HomePage após o login
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (context) => const MyHomePage()),
+          MaterialPageRoute(
+            builder: (context) => MyHomePage(
+              keyValue: key, // Passa a chave do usuário para MyHomePage
+            ),
+          ),
         );
       } else {
         _showUserFriendlyMessage(response['message']);
