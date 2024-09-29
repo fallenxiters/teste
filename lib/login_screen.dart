@@ -1,10 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:uuid/uuid.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
-import 'main.dart';
+import 'login_service.dart'; // Importando o serviço de login
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -13,240 +9,242 @@ class LoginScreen extends StatefulWidget {
   _LoginScreenState createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _LoginScreenState extends State<LoginScreen>
+    with SingleTickerProviderStateMixin {
   final TextEditingController _keyController = TextEditingController();
   bool _isLoading = false;
-  final storage = FlutterSecureStorage();
-  String udid = "";
+  bool _showError = false; // Para exibir o erro se o campo estiver vazio
+  late AnimationController _controller;
 
   @override
   void initState() {
     super.initState();
-    _getOrCreateUDID();
-  }
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 7), // Animação mais rápida
+    )..repeat(); // Animação infinita
 
-  Future<void> _getOrCreateUDID() async {
-    String? storedUdid = await storage.read(key: 'device_udid');
-    if (storedUdid == null) {
-      storedUdid = Uuid().v4();
-      await storage.write(key: 'device_udid', value: storedUdid);
-    }
-    setState(() {
-      udid = storedUdid!;
+    // Adiciona um listener para esconder o erro quando o usuário digita algo
+    _keyController.addListener(() {
+      if (_keyController.text.isNotEmpty && _showError) {
+        setState(() {
+          _showError = false; // Remove o erro assim que o usuário digita algo
+        });
+      }
     });
   }
 
-  Future<void> _login() async {
+  @override
+  void dispose() {
+    _controller.dispose();
+    _keyController.dispose(); // Não esquecer de liberar o controlador
+    super.dispose();
+  }
+
+  void _handleLogin() async {
     String key = _keyController.text.trim();
-    String token = "tXqLZmcrIw1GwYatWl1EJjCRHVNHRoW4augNMEF5oxxH8e1Tm7akuqPpdM33CLltimwcintn6lE3/b0RvthH";
-
-    if (key.isNotEmpty) {
+    
+    // Se o campo estiver vazio, exibe o erro
+    if (key.isEmpty) {
       setState(() {
-        _isLoading = true;
-      });
-
-      final response = await _loginUser(key, udid, token);
-
-      setState(() {
+        _showError = true;
         _isLoading = false;
       });
-
-      if (response['message'] == 'success') {
-        // Salva a chave após o login bem-sucedido
-        await storage.write(key: 'user_key', value: key);
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('Login bem-sucedido!', style: TextStyle(fontWeight: FontWeight.bold)),
-                Text('Key: ${response['key']}'),
-                Text('Vendedor: ${response['seller']}'),
-                Text('Expira em: ${response['expirydate']}'),
-              ],
-            ),
-            behavior: SnackBarBehavior.floating,
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 4),
-          ),
-        );
-
-        // Navega para a HomePage após o login
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => MyHomePage(
-              keyValue: key, // Passa a chave do usuário para MyHomePage
-            ),
-          ),
-        );
-      } else {
-        _showUserFriendlyMessage(response['message']);
-      }
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Por favor, insira a chave de acesso')),
+      // Se o campo estiver preenchido, prossegue com o login
+      setState(() {
+        _showError = false;
+        _isLoading = true; // Iniciar o processo de login
+      });
+
+      // Simulação do processo de login para efeitos de validação
+      await LoginService.handleLogin(
+        key,
+        context,
+        setLoadingState: (bool loading) {
+          setState(() {
+            _isLoading = loading;
+          });
+        },
       );
-    }
-  }
-
-  void _showUserFriendlyMessage(String message) {
-    String userFriendlyMessage;
-    switch (message) {
-      case 'missing parameters':
-        userFriendlyMessage = 'Alguns parâmetros estão ausentes. Por favor, tente novamente.';
-        break;
-      case 'invalid token':
-        userFriendlyMessage = 'Token inválido. Verifique sua conexão e tente novamente.';
-        break;
-      case 'disabled key':
-        userFriendlyMessage = 'Sua chave foi desativada. Entre em contato com o suporte.';
-        break;
-      case 'invalid package':
-        userFriendlyMessage = 'O pacote da chave não é compatível. Verifique suas credenciais.';
-        break;
-      case 'expired key':
-        userFriendlyMessage = 'Sua chave expirou. Renove sua assinatura para continuar.';
-        break;
-      case 'cheating key':
-        userFriendlyMessage = 'A chave não é válida para este dispositivo. O uso compartilhado não é permitido.';
-        break;
-      case 'invalid key':
-        userFriendlyMessage = 'Chave incorreta. Verifique e tente novamente.';
-        break;
-      default:
-        userFriendlyMessage = 'Ocorreu um erro inesperado. Tente novamente mais tarde.';
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(userFriendlyMessage),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: Colors.redAccent,
-        duration: const Duration(seconds: 3),
-      ),
-    );
-  }
-
-  Future<Map<String, dynamic>> _loginUser(String key, String udid, String token) async {
-    try {
-      final url = Uri.parse('https://mikeregedit.glitch.me/api/loginsystem');
-      final response = await http.post(
-        url,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'key': key, 'udid': udid, 'token': token}),
-      );
-
-      if (response.statusCode == 200) {
-        final jsonResponse = jsonDecode(response.body);
-        return {
-          'success': true,
-          'message': jsonResponse['message'],
-          'key': jsonResponse['key'],
-          'seller': jsonResponse['seller'],
-          'expirydate': jsonResponse['expirydate'],
-        };
-      } else {
-        return {'success': false, 'message': jsonDecode(response.body)['message']};
-      }
-    } catch (e) {
-      return {'success': false, 'message': 'Erro de conexão: $e'};
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: Center(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Faça login',
-                        style: GoogleFonts.poppins(
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Insira sua chave de acesso para continuar',
-                        style: GoogleFonts.poppins(
-                          fontSize: 14,
-                          color: Colors.grey,
-                        ),
-                      ),
-                      const SizedBox(height: 30),
-                      TextField(
-                        controller: _keyController,
-                        style: const TextStyle(color: Colors.white),
-                        decoration: InputDecoration(
-                          filled: true,
-                          fillColor: Colors.grey[850],
-                          hintText: 'Digite sua key',
-                          hintStyle: const TextStyle(color: Colors.grey),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none,
+      resizeToAvoidBottomInset: true,
+      body: Stack(
+        children: [
+          // Gradiente de fundo fixo
+          Positioned.fill(
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Color(0xFF1e1e26), // Cor superior
+                    Color(0xFF1a1a20), // Cor inferior mais suave e próxima
+                    Color(0xFF1e1e26), // Cor inferior
+                  ],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                ),
+              ),
+            ),
+          ),
+
+          // Conteúdo que se move quando o teclado aparece
+          SafeArea(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      'Faça login',
+                      style: GoogleFonts.poppins(
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                        shadows: [
+                          Shadow(
+                            blurRadius: 2.0,
+                            color: Colors.black.withOpacity(0.5),
+                            offset: const Offset(0, 1),
                           ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Insira sua chave de acesso para continuar',
+                      style: GoogleFonts.poppins(
+                        fontSize: 16,
+                        color: Colors.grey[400],
+                      ),
+                    ),
+                    const SizedBox(height: 30),
+                    TextField(
+                      controller: _keyController,
+                      style: GoogleFonts.poppins(
+                        fontSize: 16,
+                        color: Colors.grey[400],
+                      ),
+                      decoration: InputDecoration(
+                        filled: true,
+                        fillColor: const Color(0xFF2e2e36),
+                        hintText: 'Digite sua key',
+                        hintStyle: const TextStyle(color: Colors.grey),
+                        errorText: _showError ? 'Por favor, insira a chave de acesso' : null, // Mostra erro se estiver vazio
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
                         ),
                       ),
-                      const SizedBox(height: 20),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: _login,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: Colors.black,
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
+                    ),
+                    const SizedBox(height: 20),
+
+                    // Botão de Login
+                    GestureDetector(
+                      onTap: _isLoading ? null : _handleLogin, // Desativa o botão se estiver carregando
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          // Gradiente de fundo do botão
+                          Container(
+                            width: double.infinity,
+                            height: 50,
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [Color(0xFFBB86FC), Color(0xFF6200EE)],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              borderRadius: BorderRadius.circular(16),
                             ),
                           ),
-                          child: _isLoading
-                              ? const SizedBox(
-                                  height: 20,
-                                  width: 20,
+
+                          // Bolinhas animadas sobre o botão
+                          AnimatedBuilder(
+                            animation: _controller,
+                            builder: (context, child) {
+                              return ClipRRect(
+                                borderRadius: BorderRadius.circular(16),
+                                child: CustomPaint(
+                                  size: const Size(double.infinity, 50),
+                                  painter: InfiniteCirclePainter(_controller.value),
+                                ),
+                              );
+                            },
+                          ),
+
+                          // Exibir texto ou indicador de progresso
+                          _isLoading
+                              ? SizedBox(
+                                  width: 24,
+                                  height: 24,
                                   child: CircularProgressIndicator(
+                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                                     strokeWidth: 2,
-                                    color: Colors.black,
                                   ),
                                 )
-                              : const Text('Login', style: TextStyle(color: Colors.black)),
-                        ),
+                              : Text(
+                                  'Login',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                    shadows: [
+                                      Shadow(
+                                        blurRadius: 4.0,
+                                        color: Colors.black.withOpacity(0.5),
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: Center(
-                child: Text(
-                  'Copyright © MIKE IOS 2024',
-                  style: GoogleFonts.poppins(
-                    color: Colors.grey,
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
+  }
+}
+
+// CustomPainter para desenhar bolinhas animadas
+class InfiniteCirclePainter extends CustomPainter {
+  final double progress;
+
+  InfiniteCirclePainter(this.progress);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    double circleRadius = 2; // Raio das bolinhas
+    double spacing = 4; // Espaçamento entre as bolinhas
+
+    Paint paint = Paint()..color = Colors.white.withOpacity(0.3);
+
+    double offset = progress * (circleRadius * 2 + spacing) * 2;
+
+    for (double x = -size.width; x < size.width + circleRadius; x += circleRadius * 2 + spacing) {
+      for (double y = -size.height; y < size.height + circleRadius; y += circleRadius * 2 + spacing) {
+        canvas.save();
+        canvas.translate(x + offset + circleRadius, y + offset + circleRadius);
+        canvas.drawCircle(Offset(0, 0), circleRadius, paint);
+        canvas.restore();
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant InfiniteCirclePainter oldDelegate) {
+    return oldDelegate.progress != progress;
   }
 }
